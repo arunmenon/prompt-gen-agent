@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, task, crew, before_kickoff
-from .schemas import PromptGenConfig  # or import from your schemas module
+from .schemas import PromptGenConfig
 
 @CrewBase
 class PromptGenCrew:
@@ -12,11 +12,11 @@ class PromptGenCrew:
     A multi-step meta-crew that:
     1) Gathers user requirements (problem statement, domain, placeholders, etc.).
     2) Interprets those requirements and clarifies how to incorporate them in a prompt.
-    3) Crafts a draft prompt.
+    3) Crafts a draft prompt with a standardized structure (header/system, body, output format).
     4) Refines the prompt into final form.
     """
 
-    def __init__(self, llm_model: str = "openai/gpt-4"):
+    def __init__(self, llm_model: str = "openai/gpt-4o"):
         self.llm_model = llm_model
         # Example LLM with moderate temperature
         self.llm = LLM(model=self.llm_model, temperature=0.2, verbose=False)
@@ -40,7 +40,7 @@ class PromptGenCrew:
         return Agent(
             role="Requirements Interpreter",
             goal="Analyze user-supplied problem statement, domain, placeholders, and desired output schema. Distill constraints for building a prompt.",
-            backstory="A thorough interpreter with domain knowledge, clarifying the approach to prompt-building.",
+            backstory="A thorough interpreter with domain knowledge for {domain} , clarifying how to incorporate placeholders, domain constraints, and the final schema.",
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -56,8 +56,8 @@ class PromptGenCrew:
     def prompt_crafter(self) -> Agent:
         return Agent(
             role="Prompt Crafter",
-            goal="Construct a well-structured prompt from the interpreted requirements (domain, placeholders, output schema).",
-            backstory="A specialized prompter ensuring the user’s problem statement, domain constraints, placeholders, and final output schema are integrated clearly.",
+            goal="Construct a well-structured prompt template from the interpreted requirements, including system instructions, placeholders usage, and output schema details.",
+            backstory="An expert prompter who ensures placeholders, domain references, and final output schema are integrated with best practices.",
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -73,8 +73,8 @@ class PromptGenCrew:
     def prompt_refiner(self) -> Agent:
         return Agent(
             role="Prompt Refiner",
-            goal="Polish the drafted prompt, ensuring placeholders are consistent, instructions unambiguous, and domain references correct.",
-            backstory="A meticulous editor who perfects the final prompt for clarity, correctness, and domain alignment.",
+            goal="Polish the drafted prompt template, ensuring placeholders are used consistently and final instructions (schema, domain references) are unambiguous.",
+            backstory="A meticulous editor who perfects the final prompt structure for clarity, correctness, and domain alignment.",
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -92,6 +92,7 @@ class PromptGenCrew:
 
     @task
     def gather_user_requirements_task(self) -> Task:
+        # Step 1: Simply echo user inputs as JSON
         description = r"""
 Below are user inputs:
 
@@ -122,18 +123,38 @@ Below are user inputs:
 
     @task
     def interpret_requirements_task(self) -> Task:
+        # Step 2: Interpret how to incorporate domain, placeholders, context, schema
+        # We also ask it to decode placeholders if they contain colons
         description = r"""
 We have the raw user requirements:
 {{output}}
 
 **INSTRUCTIONS**:
-1. Clarify how the final prompt should incorporate:
+1. Please analyze the placeholders. If you see placeholders like "<<title: Some description>>", parse it into:
+   - name: "<<title>>"
+   - description: "Some description"
+   If they have no description, keep them as-is.
+2. Clarify how the final prompt template should incorporate:
    - The domain knowledge
-   - The placeholders
+   - The placeholders (with names & any descriptions)
    - The output context
    - The output schema (if any)
-2. Return strictly JSON:
-   {{ "clarification": "...some bullet points..." }}
+3. Return strictly JSON with a structure like:
+   {{
+     "clarification": [
+       "... bullet points on usage ...",
+       "... domain references ...",
+       "... placeholders usage ...",
+       "... schema instructions ..."
+     ],
+     "decoded_placeholders": [
+       {{
+         "name": "<<placeholderName>>",
+         "description": "Optional or empty if none"
+       }},
+       ...
+     ]
+   }}
 
 No extra commentary.
 """
@@ -146,15 +167,36 @@ No extra commentary.
 
     @task
     def craft_prompt_task(self) -> Task:
+        # Step 3: Build a prompt template with a standard structure:
+        # [SYSTEM], [BODY], [OUTPUT].
+        # We'll integrate placeholders & domain constraints here.
         description = r"""
-Here is the clarified approach:
+Here is the clarified approach from the previous step:
 {{output}}
 
 **INSTRUCTIONS**:
-1. Draft a single prompt string that includes domain background, placeholders, final instructions about the output, etc.
+1. Construct a SINGLE prompt template with three sections:
+
+   [SYSTEM SECTION]
+   - Summarize the domain or role the assistant should adopt. For example: "You are an expert in {domain}..."
+
+   [BODY SECTION]
+   - Incorporate instructions for using the placeholders listed under "decoded_placeholders".
+   - Show how to insert them, e.g. "<<title>>" or if there's a description, mention it briefly.
+   - Mention any constraints (tone, length, style) from the "clarification".
+   - Reference the problem statement or output context from the user if needed.
+
+   [OUTPUT SECTION]
+   - Explicitly instruct how the final output from this prompt should be formatted (e.g. in {output_schema}).
+   - If the schema is "markdown," mention to use bullet points, headings, etc.
+   - If it's "json," mention to return valid JSON, with certain fields.
+
 2. Return strictly JSON with:
-   {{ "draftPrompt": "..." }}
-No commentary.
+   {{
+     "draftPrompt": "...(the entire prompt template with the 3 sections)..."
+   }}
+
+No commentary outside of that JSON.
 """
         return Task(
             description=description,
@@ -165,15 +207,19 @@ No commentary.
 
     @task
     def refine_prompt_task(self) -> Task:
+        # Step 4: Refine the prompt template. Keep the 3 sections, placeholders, etc.
         description = r"""
 We have a draft prompt:
 {{output}}
 
 **INSTRUCTIONS**:
-1. Refine & finalize the prompt. Keep placeholders (like <<title>>) if relevant.
-2. Return strictly JSON:
+1. Refine & finalize the prompt template. Keep the same three sections:
+   [SYSTEM SECTION], [BODY SECTION], [OUTPUT SECTION].
+2. Ensure placeholders like <<title>> are not lost.
+3. Make sure the final instructions for output schema are clear and consistent.
+4. Return strictly JSON:
    {{
-     "final_prompt": "...",
+     "final_prompt": "...(the refined final prompt template)...",
      "notes": []
    }}
 
