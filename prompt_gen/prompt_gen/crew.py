@@ -104,13 +104,13 @@ Below are user inputs:
 **INSTRUCTIONS**:
 1. Convert these user inputs into a single JSON object, e.g.:
 
-{
-  "problemStatement": "...",
+{{
+  "problem_statement": "...",
   "domain": "...",
-  "inputPlaceholders": [...],
-  "outputContext": "...",
-  "outputSchema": "..."
-}
+  "input_placeholders": [...],
+  "output_context": "...",
+  "output_schema": "..."
+}}
 
 2. No extra commentary, just that JSON.
 """
@@ -133,7 +133,7 @@ We have the raw user requirements:
    - The output context
    - The output schema (if any)
 2. Return strictly JSON:
-   { "clarification": "...some bullet points..." }
+   {{ "clarification": "...some bullet points..." }}
 
 No extra commentary.
 """
@@ -153,12 +153,12 @@ Here is the clarified approach:
 **INSTRUCTIONS**:
 1. Draft a single prompt string that includes domain background, placeholders, final instructions about the output, etc.
 2. Return strictly JSON with:
-   { "draftPrompt": "..." }
+   {{ "draftPrompt": "..." }}
 No commentary.
 """
         return Task(
             description=description,
-            expected_output='{"draftPrompt": "..."}',
+            expected_output='{{"draftPrompt": "..."}}',
             agent=self.prompt_crafter(),
             context=[self.interpret_requirements_task()]
         )
@@ -172,16 +172,16 @@ We have a draft prompt:
 **INSTRUCTIONS**:
 1. Refine & finalize the prompt. Keep placeholders (like <<title>>) if relevant.
 2. Return strictly JSON:
-   {
+   {{
      "final_prompt": "...",
      "notes": []
-   }
+   }}
 
 No commentary or extra fields.
 """
         return Task(
             description=description,
-            expected_output='{"final_prompt":"...","notes":[]}',
+            expected_output='{{"final_prompt":"...","notes":[]}}',
             agent=self.prompt_refiner(),
             context=[self.craft_prompt_task()],
             output_pydantic=PromptGenConfig  # ensures we get final_prompt in structured form
